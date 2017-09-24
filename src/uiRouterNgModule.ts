@@ -16,24 +16,27 @@ import { ROUTES } from "@angular/router";
 /** @hidden */ export const UIROUTER_STATES       = new InjectionToken("UIRouter States");
 // /** @hidden */ export const ROUTES = UIROUTER_STATES;
 
-export function onTransitionReady(transitionService: TransitionService, plateformId) {
-    if (isPlatformServer(plateformId)) {
-       return () => Promise.resolve();
-    }
+// Delay angular bootstrap until first transition is successful, for SSR.
+// See https://github.com/ui-router/angular/pull/127
+export function onTransitionReady(transitionService: TransitionService, root: RootModule[]) {
+  let mod = root[0];
+  if (!mod || !mod.deferInitialRender) {
+    return () => Promise.resolve();
+  }
 
-    return () => new Promise(resolve => {
-      transitionService.onSuccess({}, resolve);
-      transitionService.onError({}, resolve);
-    });
+  return () => new Promise(resolve => {
+    const hook = trans => { trans.promise.then(resolve, resolve); };
+    transitionService.onStart({}, hook, { invokeLimit: 1 });
+  });
 }
 
-export function makeRootProviders(module: StatesModule): Provider[] {
+export function makeRootProviders(module: RootModule): Provider[] {
     return [
         { provide: UIROUTER_ROOT_MODULE,         useValue: module,              multi: true},
         { provide: UIROUTER_MODULE_TOKEN,        useValue: module,              multi: true },
         { provide: ROUTES,                       useValue: module.states || [], multi: true },
         { provide: ANALYZE_FOR_ENTRY_COMPONENTS, useValue: module.states || [], multi: true },
-        { provide: APP_INITIALIZER, useFactory: onTransitionReady, deps: [TransitionService, PLATFORM_ID], multi: true },
+        { provide: APP_INITIALIZER, useFactory: onTransitionReady, deps: [TransitionService, UIROUTER_ROOT_MODULE], multi: true },
     ];
 }
 
@@ -184,6 +187,15 @@ export interface RootModule extends StatesModule {
    * Sets [[UrlRouterProvider.deferIntercept]]
    */
   deferIntercept?: boolean;
+
+  /**
+   * Tells Angular to defer first render until after the initial transition is complete.
+   *
+   * When `true`, adds an `APP_INITIALIZER` which resolves on any `onSuccess` or `onError`.
+   *
+   * Defaults to `false`
+   */
+  deferInitialRender?: boolean;
 }
 
 /**
